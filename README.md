@@ -26,15 +26,15 @@ You will need:
       BEGIN
         IF TG_OP = 'INSERT' THEN
           PERFORM amqp.publish(1, 'pg', 'database', row_to_json(e)::text)
-            FROM (VALUES ('artist', lower(TG_OP), NEW))
+            FROM (VALUES (TG_TABLE_NAME, lower(TG_OP), NEW))
               AS e ("table", event, "new");
         ELSIF TG_OP = 'DELETE' THEN
           PERFORM amqp.publish(1, 'pg', 'database', row_to_json(e)::text)
-            FROM (VALUES ('artist', lower(TG_OP), OLD))
+            FROM (VALUES (TG_TABLE_NAME, lower(TG_OP), OLD))
               AS e ("table", event, "old");
         ELSIF TG_OP = 'UPDATE' THEN
           PERFORM amqp.publish(1, 'pg', 'database', row_to_json(e)::text)
-            FROM (VALUES ('artist', lower(TG_OP), OLD, NEW))
+            FROM (VALUES (TG_TABLE_NAME, lower(TG_OP), OLD, NEW))
               AS e ("table", event, "old", "new");
         END IF;
         RETURN NULL;

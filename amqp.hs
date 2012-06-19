@@ -2,6 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import           Control.Applicative ((<*>), (<$>))
+import           Control.Concurrent (forkIO)
+import           Control.Concurrent.QSem
 import           Control.Monad (forever)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader (ReaderT, asks, runReaderT)
@@ -12,11 +14,11 @@ import qualified Data.ByteString.Lazy.Char8 as LBS
 import           Data.Text (Text)
 import           Database.PostgreSQL.Simple (Connection, connect, defaultConnectInfo, Only(..), query, ConnectInfo(..))
 import           Network.AMQP (consumeMsgs, Ack(..), queueName, bindQueue, openChannel, declareQueue, newQueue, ackEnv, openConnection, msgBody, Message, Envelope, declareExchange, newExchange, exchangeName, exchangeType)
-import           Network.HTTP.Conduit (httpLbs, withManager, parseUrl, method, Manager, newManager, def)
+import           Network.HTTP.Conduit (http, withManager, parseUrl, method, Manager, newManager, def)
 import           System.Log.Logger (debugM, infoM, errorM, updateGlobalLogger, setLevel, Priority(..))
 
 -- | A basic environment the script runs in.
-data Env = Env { pgConn :: Connection, httpManager :: Manager }
+data Env = Env { pgConn :: Connection, httpManager :: Manager, sem :: QSem }
 
 type Script a = ReaderT Env (ResourceT IO) a
 
@@ -38,7 +40,7 @@ jsonRowMapping :: String -> Maybe (Object -> Parser Row)
 jsonRowMapping tableName = case tableName of
   "artist" -> return $ \o -> Artist <$> o .: "id" <*> o .: "gid"
   _ -> Nothing
-,
+
 instance FromJSON Event where
   parseJSON (Object v) = do
       tableName <- v .: "table"
@@ -79,12 +81,17 @@ varnishPrefix = "http://localhost:9000/ws/2"
 
 addBan :: String -> Script ()
 addBan path = do
-  manager <- asks httpManager
-  initReq <- parseUrl $ varnishPrefix ++ path
-  let req = initReq { method = "BAN" }
-  liftIO $ infoM "MBCacheInvalidator" $ "Adding ban " ++ path
-  res <- httpLbs req manager
-  liftIO $ debugM "MBCacheInvalidator" $ "Ban response: " ++ show res
+  sem <- asks sem
+  env <- asks httpManager
+  liftIO $ do
+    waitQSem sem
+    debugM "MBCacheInvalidator" $ "Adding a ban on " ++ path
+    forkIO $ runResourceT $ do
+      initReq <- parseUrl $ varnishPrefix ++ path
+      let req = initReq { method = "BAN" }
+      http req httpManager
+      liftIO $ signalQSem sem
+  return ()
 
 handleEvent :: Event -> Script ()
 handleEvent e = mapM_ rowChanged rows
@@ -122,5 +129,6 @@ main = do
     forever getLine
   where buildCallback = do pgConn <- connect defaultConnectInfo { connectDatabase = "musicbrainz" }
                            httpManager <- newManager def
-                           let env = Env { pgConn = pgConn, httpManager = httpManager }
+                           sem <- newQSem 5
+                           let env = Env { pgConn = pgConn, httpManager = httpManager, sem = sem }
                            return $ \cb -> runResourceT $ runReaderT (receiveMessage cb) env

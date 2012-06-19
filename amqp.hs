@@ -31,6 +31,7 @@ data Event = Update Row Row | Insert Row | Delete Row
 -- | The various different rows inside the database, with the columns that are
 -- important for cache invalidation.
 data Row = Artist { artistId :: Int, artistMbid :: String }
+         | Recording { recordingId :: Int }
   deriving (Show)
 
 -- | Map a table name to a JSON parser. May fail, if we don't have a parser for
@@ -39,6 +40,7 @@ data Row = Artist { artistId :: Int, artistMbid :: String }
 jsonRowMapping :: String -> Maybe (Object -> Parser Row)
 jsonRowMapping tableName = case tableName of
   "artist" -> return $ \o -> Artist <$> o .: "id" <*> o .: "gid"
+  "recording" -> return $ \o -> Recording <$> o .: "id"
   _ -> Nothing
 
 instance FromJSON Event where
@@ -47,7 +49,7 @@ instance FromJSON Event where
       event     <- v .: "event"
       case jsonRowMapping tableName of
         Nothing -> fail $ "Unknown table " ++ tableName
-        Just m -> do
+        Just m ->
           case event of
             "insert" -> Insert <$> takeData v "new" m
             "delete" -> Delete <$> takeData v "old" m
@@ -59,6 +61,7 @@ instance FromJSON Event where
 
 rowChanged :: Row -> Script ()
 rowChanged (Artist id mbid) = addBan $ "artist:" ++ show id
+rowChanged (Recording id) = addBan $ "recording:" ++ show id
 
 varnishPrefix :: String
 varnishPrefix = "http://localhost:9000/"
@@ -66,7 +69,7 @@ varnishPrefix = "http://localhost:9000/"
 addBan :: String -> Script ()
 addBan path = do
   sem <- asks sem
-  env <- asks httpManager
+  httpManager <- asks httpManager
   liftIO $ do
     waitQSem sem
     debugM "MBCacheInvalidator" $ "Adding a ban on " ++ path
@@ -88,8 +91,8 @@ receiveMessage :: (Message, Envelope) -> Script ()
 receiveMessage (msg, env) = do
   case decode (msgBody msg) of
     Nothing -> liftIO $ do
-      errorM "MBCacheInvalidator" $ "Error occured handling event"
-      errorM "MBCacheInvalidator" $ "Message body: " ++ (LBS.unpack $ msgBody msg)
+      errorM "MBCacheInvalidator"  "Error occured handling event"
+      errorM "MBCacheInvalidator" $ "Message body: " ++ LBS.unpack (msgBody msg)
     Just event -> do
       liftIO $ debugM "MBCacheInvalidator" $ "Handling: " ++ show event
       handleEvent event

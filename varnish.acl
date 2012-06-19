@@ -1,0 +1,25 @@
+backend be_musicbrainz {
+ .host = "127.0.0.1";
+ .port = "5000";
+}
+
+sub vcl_recv {
+	if (req.request == "BAN") {
+	    # This option is to clear any cached object containing the req.url
+	    ban("req.url ~ "+req.url);
+
+	    # This option is to clear any cached object matches the exact req.url
+	    # ban("req.url == "+req.url);
+
+	    # This option is to clear any cached object containing the req.url
+	    # AND matching the hostname.
+	    # ban("req.url ~ "+req.url+" && req.http.host == "+req.http.host);
+
+	    error 200 "Cached Cleared Successfully.";
+	}
+	return(lookup);
+}
+
+sub vcl_fetch {
+    set beresp.ttl = 1w;
+}

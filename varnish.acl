@@ -5,17 +5,9 @@ backend be_musicbrainz {
 
 sub vcl_recv {
 	if (req.request == "BAN") {
-	    # This option is to clear any cached object containing the req.url
-	    ban("req.url ~ "+req.url);
-
-	    # This option is to clear any cached object matches the exact req.url
-	    # ban("req.url == "+req.url);
-
-	    # This option is to clear any cached object containing the req.url
-	    # AND matching the hostname.
-	    # ban("req.url ~ "+req.url+" && req.http.host == "+req.http.host);
-
-	    error 200 "Cached Cleared Successfully.";
+        set req.url = regsub(req.url, "^\/", "");
+	    ban("obj.http.dependencies ~ " + req.url);
+	    error 200 "Cached Cleared Successfully. " + "obj.http.dependencies ~ " + req.url;
 	}
 	return(lookup);
 }

@@ -58,26 +58,10 @@ instance FromJSON Event where
   parseJSON _ = fail "Expected a JSON object"
 
 rowChanged :: Row -> Script ()
-
-rowChanged (Artist id mbid) = do
-    -- Clear the entire artist
-    addBan $ "/artist/" ++ mbid
-
-    --
-    liftIO $ infoM "MBCacheInvalidator" ("Finding artist credits that refer to " ++ mbid)
-    invalidateLinkedArtistCredits
-  where invalidateLinkedArtistCredits = do
-          conn <- asks pgConn
-          liftIO (query conn "SELECT artist_credit FROM musicbrainz.artist_credit_name WHERE artist = ?" (Only id)) >>= mapM_ (invalidateArtistCredit . fromOnly)
-
-invalidateArtistCredit :: Int -> Script ()
-invalidateArtistCredit id = do
-  c <- asks pgConn
-  (liftIO $ query c "SELECT gid::text FROM musicbrainz.recording WHERE artist_credit = ?" (Only id))
-    >>= mapM_ (addBan . ("/recording/" ++) . fromOnly)
+rowChanged (Artist id mbid) = addBan $ "artist:" ++ show id
 
 varnishPrefix :: String
-varnishPrefix = "http://localhost:9000/ws/2"
+varnishPrefix = "http://localhost:9000/"
 
 addBan :: String -> Script ()
 addBan path = do
@@ -113,7 +97,7 @@ receiveMessage (msg, env) = do
 
 main :: IO ()
 main = do
-    updateGlobalLogger "MBCacheInvalidator" (setLevel INFO)
+    updateGlobalLogger "MBCacheInvalidator" (setLevel DEBUG)
 
     conn <- openConnection "127.0.0.1" "/" "guest" "guest"
     chan <- openChannel conn

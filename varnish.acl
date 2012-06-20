@@ -14,4 +14,5 @@ sub vcl_recv {
 
 sub vcl_fetch {
     set beresp.ttl = 1w;
+    set beresp.http.Last-Modified = now;
 }
